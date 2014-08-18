@@ -50,18 +50,7 @@ class NetteExtension extends Nette\DI\CompilerExtension
 			'debugger' => FALSE,
 			'accessors' => FALSE,
 		),
-		'debugger' => array(
-			'email' => NULL,
-			'editor' => NULL,
-			'browser' => NULL,
-			'strictMode' => NULL,
-			'maxLen' => NULL,
-			'maxDepth' => NULL,
-			'showLocation' => NULL,
-			'scream' => NULL,
-			'bar' => array(), // of class name
-			'blueScreen' => array(), // of callback
-		),
+		'debugger' => array(), // BC
 	);
 
 
@@ -73,7 +62,6 @@ class NetteExtension extends Nette\DI\CompilerExtension
 		$this->validate($config, $this->defaults, 'nette');
 
 		$this->setupHttp($container, $config['http']);
-		$this->setupTracy($container, $config['debugger']);
 		$this->setupSession($container, $config['session']);
 		$this->setupSecurity($container, $config['security']);
 		$this->setupContainer($container, $config['container']);
@@ -101,20 +89,6 @@ class NetteExtension extends Nette\DI\CompilerExtension
 	}
 
 
-	private function setupTracy(ContainerBuilder $container, array $config)
-	{
-		$container->addDefinition($this->prefix('logger'))
-			->setClass('Tracy\ILogger')
-			->setFactory('Tracy\Debugger::getLogger');
-
-		$container->addDefinition($this->prefix('blueScreen'))
-			->setFactory('Tracy\Debugger::getBlueScreen');
-
-		$container->addDefinition($this->prefix('bar'))
-			->setFactory('Tracy\Debugger::getBar');
-	}
-
-
 	private function setupSession(ContainerBuilder $container, array $config)
 	{
 		$session = $container->addDefinition('session') // no namespace for back compatibility
@@ -122,12 +96,6 @@ class NetteExtension extends Nette\DI\CompilerExtension
 
 		if (isset($config['expiration'])) {
 			$session->addSetup('setExpiration', array($config['expiration']));
-		}
-
-		if ($container->parameters['debugMode'] && $config['debugger']) {
-			$session->addSetup('@Tracy\Bar::addPanel', array(
-				new Nette\DI\Statement('Nette\Bridges\HttpTracy\SessionPanel')
-			));
 		}
 
 		unset($config['expiration'], $config['autoStart'], $config['debugger']);
@@ -145,14 +113,8 @@ class NetteExtension extends Nette\DI\CompilerExtension
 			->setClass('Nette\Security\IUserStorage')
 			->setFactory('Nette\Http\UserStorage');
 
-		$user = $container->addDefinition('user') // no namespace for back compatibility
+		$container->addDefinition('user') // no namespace for back compatibility
 			->setClass('Nette\Security\User');
-
-		if ($container->parameters['debugMode'] && $config['debugger']) {
-			$user->addSetup('@Tracy\Bar::addPanel', array(
-				new Nette\DI\Statement('Nette\Bridges\SecurityTracy\UserPanel')
-			));
-		}
 
 		if ($config['users']) {
 			$usersList = $usersRoles = array();
@@ -191,39 +153,38 @@ class NetteExtension extends Nette\DI\CompilerExtension
 	}
 
 
+	public function beforeCompile()
+	{
+		$container = $this->getContainerBuilder();
+		$config = $this->getConfig($this->defaults);
+
+		if ($container->findByType('Tracy\Bar')) {
+			if ($container->parameters['debugMode'] && $config['session']['debugger']) {
+				$container->getDefinition($this->prefix('session'))->addSetup("@Tracy\Bar::addPanel", array(
+						new Nette\DI\Statement('Nette\Bridges\HttpTracy\SessionPanel')
+					));
+			}
+
+			if ($container->parameters['debugMode'] && $config['security']['debugger']) {
+				$container->getDefinition('user')->addSetup("@Tracy\Bar::addPanel", array(
+						new Nette\DI\Statement('Nette\Bridges\SecurityTracy\UserPanel')
+					));
+			}
+		}
+	}
+
+
 	public function afterCompile(Nette\PhpGenerator\ClassType $class)
 	{
 		$initialize = $class->methods['initialize'];
 		$container = $this->getContainerBuilder();
 		$config = $this->getConfig($this->defaults);
 
-		// debugger
-		$initialize->addBody('Nette\Bridges\Framework\TracyBridge::initialize();');
-
-		foreach (array('email', 'editor', 'browser', 'strictMode', 'maxLen', 'maxDepth', 'showLocation', 'scream') as $key) {
-			if (isset($config['debugger'][$key])) {
-				$initialize->addBody('Tracy\Debugger::$? = ?;', array($key, $config['debugger'][$key]));
-			}
-		}
-
-		if ($container->parameters['debugMode']) {
-			if ($config['container']['debugger']) {
-				$config['debugger']['bar'][] = 'Nette\Bridges\DITracy\ContainerPanel';
-			}
-
-			foreach ((array) $config['debugger']['bar'] as $item) {
-				$initialize->addBody($container->formatPhp(
-					'$this->getService(?)->addPanel(?);',
-					Nette\DI\Compiler::filterArguments(array($this->prefix('bar'), is_string($item) ? new Nette\DI\Statement($item) : $item))
-				));
-			}
-		}
-
-		foreach ((array) $config['debugger']['blueScreen'] as $item) {
+		if ($container->parameters['debugMode'] && $config['container']['debugger'] && $container->findByType('Tracy\Bar')) {
 			$initialize->addBody($container->formatPhp(
-				'$this->getService(?)->addPanel(?);',
-				Nette\DI\Compiler::filterArguments(array('@Tracy\BlueScreen', $item))
-			));
+					'$this->getService(?)->addPanel(?);',
+					Nette\DI\Compiler::filterArguments(array('@Tracy\Bar', new Nette\DI\Statement('Nette\Bridges\DITracy\ContainerPanel')))
+				));
 		}
 
 		foreach ((array) $config['forms']['messages'] as $name => $text) {

@@ -36,6 +36,7 @@ class Configurator extends Object
 		'constants' => 'Nette\DI\Extensions\ConstantsExtension',
 		'extensions' => 'Nette\DI\Extensions\ExtensionsExtension',
 		'nette' => 'Nette\Bridges\Framework\NetteExtension',
+		'tracy' => 'Tracy\Bridges\TracyNette\TracyExtension',
 		'application' => 'Nette\Bridges\ApplicationDI\ApplicationExtension',
 		'routing' => 'Nette\Bridges\ApplicationDI\RoutingExtension',
 		'latte' => 'Nette\Bridges\ApplicationDI\LatteExtension',
@@ -136,9 +137,14 @@ class Configurator extends Object
 	 * @param  string        error log directory
 	 * @param  string        administrator email
 	 * @return void
+	 * @throws Nette\NotSupportedException if Tracy is not available
 	 */
 	public function enableDebugger($logDirectory = NULL, $email = NULL)
 	{
+		if (!class_exists('Tracy\Debugger')) {
+			throw new Nette\NotSupportedException('Tracy not found, do you have `tracy/tracy` package installed?');
+		}
+
 		Tracy\Debugger::$strictMode = TRUE;
 		Tracy\Debugger::enable(!$this->parameters['debugMode'], $logDirectory, $email);
 	}
